@@ -22,12 +22,14 @@ class TwitterScraper:
         #     'count': 100
         # }
 
-        search_params = {"query": 'Biden "vote"', "maxResults": "100", "fromDate": "<202003021200>", "toDate": "<202003022400>"}
+        search_params = {'query': 'Biden "vote"', 'maxResults': '100', 'fromDate': '202003021215', 'toDate': '202003022300'}
 
         search_id = uuid.uuid4().hex
 
-        search_resp = requests.get(TwitterScraper.search_url, params=search_params, headers=TwitterScraper.search_header)
-        tweets = search_resp.json()["statuses"]
+        search_resp = requests.get(TwitterScraper.search_url, params = search_params, headers = TwitterScraper.search_header)
+        tweets = search_resp.json()["results"]
+
+        print(tweets[0])
 
         TwitterScraper.process_tweets(tweets, search_params, search_id)
         TwitterScraper.put_tweets_in_database(tweets)
