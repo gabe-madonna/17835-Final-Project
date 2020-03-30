@@ -29,7 +29,7 @@ class TwitterScraper:
     def scrape_tweets():
         """
         general tweet scraper - scrape by content
-        :return: None
+        :return tweets: [dict] the tweet objects
         """
         search_params = {"query": 'Biden "vote"', "maxResults": "100",
                          "fromDate": "<202003021200>", "toDate": "<202003022400>"}
@@ -40,6 +40,7 @@ class TwitterScraper:
 
         TwitterScraper.process_objects(tweets, search_params, search_id, object_type="tweet")
         TwitterScraper.put_objects_in_database(tweets)
+        return tweets
 
     @staticmethod
     def scrape_user_timeline(screen_name: str):
@@ -48,7 +49,7 @@ class TwitterScraper:
         can also scrape multiple batches of 200 in a row, requires extra dev
         saves them in the database
         :param screen_name: twitter handle of user to scrape
-        :return: None
+        :return tweets: [obj] the tweet objects
         """
         search_params = {"screen_name": screen_name, "count": 200, "exclude_replies": True,
                          "include_rts": True, "tweet_mode": "extended"}
@@ -59,13 +60,14 @@ class TwitterScraper:
 
         TwitterScraper.process_objects(tweets, search_params, search_id, object_type="tweet")
         TwitterScraper.put_objects_in_database(tweets)
+        return tweets
 
     @staticmethod
     def scrape_user_profiles(screen_names: [str]):
         """
         scrape the user profiles of the screen names specified then save them in the database
         :param screen_names: ([str]) a list of handles of the users to scrape
-        :return:
+        :return profiles: [dict] the user profile objects
         """
         search_params = {"screen_name": screen_names}
         search_id = uuid.uuid4().hex
@@ -75,6 +77,7 @@ class TwitterScraper:
 
         TwitterScraper.process_objects(profiles, search_params, search_id, object_type="user")
         TwitterScraper.put_objects_in_database(profiles)
+        return profiles
 
     @staticmethod
     def process_objects(objects: [dict], query: dict, search_id: str, object_type: str):
