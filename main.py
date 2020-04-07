@@ -83,7 +83,7 @@ class TwitterScraper:
     @staticmethod
     def delete_objects_in_database():
         db = TwitterScraper.fetch_database()
-        db.delete_many({})
+        db.delete_many({"lang": {"$exists": True, "$ne": "en"}})
 
     @staticmethod
     def scrape_tweets():
@@ -173,7 +173,7 @@ class TwitterScraper:
         :return tweets: [obj] the tweet objects
         """
         search_params = {"count": 200, "exclude_replies": True,
-                         "include_rts": True, "tweet_mode": "extended"}
+                         "include_rts": True, "tweet_mode": "extended", "lang": "en"}
         if screen_name is None:
             assert user_id is not None
             search_params["user_id"] = user_id
@@ -189,6 +189,8 @@ class TwitterScraper:
             # raise Exception(tweets["error"])
             print("Error: unable to scrape tweets from {}".format(screen_name if screen_name is not None else user_id))
             return []
+
+        tweets = list(filter(lambda tweet: tweet["lang"] == "en", tweets))
 
         TwitterScraper.process_objects(tweets, search_params, search_id, object_type="tweet")
         TwitterScraper.put_database_objects(tweets)
@@ -296,8 +298,8 @@ class TwitterScraper:
 
 
 if __name__ == '__main__':
-    # tweets = TwitterScraper.scrape_users_followers_timelines(NETWORKS, n_followers=10)
-    tweets = TwitterScraper.fetch_all_tweets(group_by="follows")
+    tweets = TwitterScraper.scrape_users_followers_timelines(["OANN"], n_followers=100)
+    # tweets = TwitterScraper.fetch_all_tweets(group_by="follows")
     # tweets = TwitterScraper.fetch_all_tweets()
     # TwitterScraper.scrape_users_timelines(ALL_TWITTERS)
     # objects = TwitterScraper.fetch_user_tweets("seanhannity")
