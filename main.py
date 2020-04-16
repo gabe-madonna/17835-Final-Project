@@ -4,10 +4,13 @@ import datetime
 import uuid
 from bson.json_util import dumps
 from random import sample as random_sample
+import numpy as np
+
+BIASES = {"patribotics": -38, "Bipartisanism": -26, "fwdprogressives": -25, "HuffPost": -22, "MSNBC": -19,  "washingtonpost": -10, "CNN": -7, "propublica": -5,  "NPR": -5, "PBS": -5, "nytimes": -4, "ABC": 0, "business": 1, "CBSNews": 4, "Forbes": 5, "thehill": 10, "weeklystandard": 18, "TheTimesNUSA": 20, "amconmag": 27, "FoxNews": 27, "OANN": 28, "realDailyWire": 28, "BreitbartNews": 34, "newswarz": 38}
 
 
 POLITICIANS = ["BarackObama", "realDonaldTrump", "HillaryClinton", "SpeakerPelosi"]
-NETWORKS = ["NPR", "MSNBC", "CNNPolitics", "BostonGlobe", "nytimes", "FoxNews", "foxandfriends"]
+NETWORKS = list(BIASES.keys())
 ORGANIZATIONS = ["TheDemocrats", "GOP"]
 CELEBS_POLITICAL = ["seanhannity"]
 CELEBS = []
@@ -74,7 +77,7 @@ class TwitterScraper:
         :param fields: [str] optional, the fields in the objects to fetch (defaults to fetching all fields)
         :return objects: [dict] list of objects
         """
-        fields = None if fields is None else {field: {"$exists": True} for field in fields}
+        fields = None if fields is None else {field: True for field in fields}
         db = TwitterScraper.fetch_database()
         objects = list(db.find(query, fields))
         print("fetched {} objects from database".format(len(objects)))
@@ -82,8 +85,22 @@ class TwitterScraper:
 
     @staticmethod
     def delete_objects_in_database():
-        db = TwitterScraper.fetch_database()
-        db.delete_many({"lang": {"$exists": True, "$ne": "en"}})
+        """
+        discresionary method to delete tweet objects
+        :return None: None
+        """
+        pass
+        # db = TwitterScraper.fetch_database()
+        # db.delete_many({"lang": {"$exists": True, "$ne": "en"}})
+
+    @staticmethod
+    def count_tweets():
+        """
+        count and print the number of tweet objects in database
+        :retun None: None
+        """
+        n_tweets = len(TwitterScraper.fetch_database_objects(query={"17835.type": "tweet"}, fields=["_id"]))
+        print("N tweets in database: {}".format(n_tweets))
 
     @staticmethod
     def scrape_tweets():
@@ -142,7 +159,8 @@ class TwitterScraper:
             (if grouped, returns tweets as dict mapping field to list of tweets in that group)
         :return objects/objects_map: ([dict]/{group: [dict]) all tweet objects (grouped if group_by is not None)
         """
-        objects = TwitterScraper.fetch_database_objects(query={"17835.type": "tweet"})
+        objects = TwitterScraper.fetch_database_objects(query={"17835.type": "tweet"},
+                                                        fields=["full_text", "screen_name", "17835.bias", "17835.follows"])
         if group_by is None:
             return objects
         else:
@@ -173,7 +191,7 @@ class TwitterScraper:
         :return tweets: [obj] the tweet objects
         """
         search_params = {"count": 200, "exclude_replies": True,
-                         "include_rts": True, "tweet_mode": "extended", "lang": "en"}
+                         "include_rts": False, "tweet_mode": "extended", "lang": "en"}
         if screen_name is None:
             assert user_id is not None
             search_params["user_id"] = user_id
@@ -272,14 +290,17 @@ class TwitterScraper:
         :param n_followers: (int) number of followers to scrape
         :return tweets: ([dict]) the aggregated tweets of all followers of screen_name
         """
+        print("Scraping followers of {}".format(screen_name))
         follower_ids = random_sample(TwitterScraper.scrape_user_followers(screen_name=screen_name), n_followers)
         tweets = []
         for follower_id in follower_ids:
             new_tweets = TwitterScraper.scrape_user_timeline(user_id=follower_id)
             for tweet in new_tweets:
                 tweet["17835"]["follows"] = screen_name
+                tweet["17835"]["bias"] = BIASES.get(screen_name, None)
             TwitterScraper.update_database_objects(new_tweets)
             tweets += new_tweets
+        print("found {} tweets".format(len(tweets)))
         return tweets
 
     @staticmethod
@@ -298,7 +319,8 @@ class TwitterScraper:
 
 
 if __name__ == '__main__':
-    tweets = TwitterScraper.scrape_users_followers_timelines(["OANN"], n_followers=100)
+    TwitterScraper.count_tweets()
+    # tweets = TwitterScraper.scrape_users_followers_timelines(NETWORKS[:1], n_followers=50)
     # tweets = TwitterScraper.fetch_all_tweets(group_by="follows")
     # tweets = TwitterScraper.fetch_all_tweets()
     # TwitterScraper.scrape_users_timelines(ALL_TWITTERS)
