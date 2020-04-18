@@ -47,6 +47,11 @@ def merge_lists(lists):
     return sum(lists, [])
 
 
+def gen_freq_dict(objects, object_field_func=lambda object: object):
+    import numpy as np
+    return dict(zip(*np.unique(list(map(object_field_func, objects)), return_counts=True)))
+
+
 class TwitterScraper:
     access_token = "AAAAAAAAAAAAAAAAAAAAADmpCwEAAAAArVTe5zTHz2ookNDQIlGImi9Fdqw%3D4GuHEFgH7ZQuSM3d4flg8eTTlafRVaTdUBrUTOJFdZMnnDQ6ji"
     client_key = "65bULXQXhB9DD9MWtiWmuj12Y"
@@ -120,13 +125,25 @@ class TwitterScraper:
         # db.delete_many({"lang": {"$exists": True, "$ne": "en"}})
 
     @staticmethod
-    def count_tweets():
+    def count_tweets(by=None):
         """
         count and print the number of tweet objects in database
         :retun None: None
         """
-        n_tweets = len(TwitterScraper.fetch_database_objects(query={"17835.type": "tweet"}, fields=["_id"]))
-        print("N tweets in database: {}".format(n_tweets))
+        if by is not None:
+            fields = ["17835." + by]
+            freq_f = lambda tweet: tweet["17835"].get(by, 0)
+        else:
+            fields = ["_id"]
+        tweets = TwitterScraper.fetch_database_objects(query={"17835.type": "tweet"}, fields=fields)
+
+        print("N tweets in database")
+        if by is None:
+            print(len(tweets))
+        else:
+            freqs = gen_freq_dict(tweets, object_field_func=freq_f)
+            print(freqs)
+
 
     @staticmethod
     def scrape_tweets():
@@ -360,9 +377,9 @@ class TwitterScraper:
 
 
 if __name__ == '__main__':
-    TwitterScraper.count_tweets()
-    tweets = TwitterScraper.scrape_users_followers_timelines(NETWORKS, n_followers=5000)
-    # tweets = TwitterScraper.fetch_all_tweets(group_by="follows")
+    TwitterScraper.count_tweets(by="bias")
+    # tweets = TwitterScraper.scrape_users_followers_timelines(NETWORKS, n_followers=5000)
+    # tweets = TwitterScraper.fetch_all_tweets(group_by="follows")git cmp ZDf
     # tweets = TwitterScraper.fetch_all_tweets()
     # TwitterScraper.scrape_users_timelines(ALL_TWITTERS)
     # objects = TwitterScraper.fetch_user_tweets("seanhannity")
