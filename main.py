@@ -37,10 +37,39 @@ def thread_run(func, arg_list:list):
     for i, args in enumerate(arg_list):
         q.put_nowait((i, args))
 
-    for _ in range(64):
+    for _ in range(4):
         threading.Thread(target=worker_func, daemon=True, args=(q, func, out_list)).start()
     q.join()
     return out_list
+
+
+def parallel_worker_func(f, f_args, i, out_list):
+        out_list[i] = f(**f_args)
+
+
+def parallel_run(target_f, arg_list):
+    from multiprocessing import Manager, Pool
+    import copy
+    import multiprocessing
+
+    assert type(arg_list) == list
+
+    manager = Manager()
+    out_list = manager.list([0] * len(arg_list))
+
+    pool_size = multiprocessing.cpu_count() * 2
+    pool = Pool(max(1, pool_size))
+
+    print("running multiprocess on {} workers".format(pool_size))
+    results = [pool.apply_async(parallel_worker_func, (target_f, copy.deepcopy(args), i, out_list)) for i, args in enumerate(arg_list)]
+    pool.close()
+    pool.join()
+
+    for r in results:
+        if isinstance(r._value, BaseException):
+            raise r._value
+
+    return list(out_list)
 
 
 def merge_lists(lists):
@@ -305,13 +334,17 @@ class TwitterScraper:
         search_params = {"screen_name": screen_name, "count": 5000}
         search_id = uuid.uuid4().hex
         search_resp = requests.get(TwitterScraper.followers_url, params=search_params,
-                                   headers=TwitterScraper.search_header)
+                                   headers=TwitterScraper.search_header).json()
 
-        follower_ids = search_resp.json()["ids"]
-        user["17835"]["follower_ids"] = follower_ids
+        if "errors" in search_resp:
+            print("Unable to scrape followers of {} ({})".format(screen_name, search_resp["errors"][0]["message"]))
+            return []
+        else:
+            follower_ids = search_resp["ids"]
+            user["17835"]["follower_ids"] = follower_ids
 
-        TwitterScraper.put_database_objects([user])
-        return follower_ids
+            TwitterScraper.put_database_objects([user])
+            return follower_ids
 
     @staticmethod
     def scrape_users_followers(screen_names: [str]):
@@ -333,33 +366,35 @@ class TwitterScraper:
         :param n_followers: (int) number of followers to scrape
         :return tweets: ([dict]) the aggregated tweets of all followers of screen_name
         """
-        def scrape_user_followers_helper(follower_id):
-            new_tweets = TwitterScraper.scrape_user_timeline(user_id=follower_id)
-            for tweet in new_tweets:
-                tweet["17835"]["follows"] = screen_name
-                tweet["17835"]["bias"] = BIASES.get(screen_name, None)
-            TwitterScraper.update_database_objects(new_tweets)
-            return new_tweets
-
-        print("Scraping followers of {}".format(screen_name))
-        follower_ids = random_sample(TwitterScraper.scrape_user_followers(screen_name=screen_name), n_followers)
-        arg_list = [{"follower_id": follower_id} for follower_id in follower_ids]
-        tweets = merge_lists(thread_run(scrape_user_followers_helper, arg_list=arg_list))
-        print("found {} tweets".format(len(tweets)))
-        return tweets
-
-        # print("Scraping followers of {}".format(screen_name))
-        # follower_ids = random_sample(TwitterScraper.scrape_user_followers(screen_name=screen_name), n_followers)
-        # tweets = []
-        # for follower_id in follower_ids:
+        # def scrape_user_followers_helper(follower_id):
         #     new_tweets = TwitterScraper.scrape_user_timeline(user_id=follower_id)
         #     for tweet in new_tweets:
         #         tweet["17835"]["follows"] = screen_name
         #         tweet["17835"]["bias"] = BIASES.get(screen_name, None)
         #     TwitterScraper.update_database_objects(new_tweets)
-        #     tweets += new_tweets
+        #     print("scraped {} tweets from {}".format(len(new_tweets), follower_id))
+        #     return new_tweets
+        #
+        # print("Scraping followers of {}".format(screen_name))
+        # follower_ids_raw = TwitterScraper.scrape_user_followers(screen_name=screen_name)
+        # follower_ids = random_sample(follower_ids_raw, min(n_followers, len(follower_ids_raw)))
+        # arg_list = [{"follower_id": follower_id} for follower_id in follower_ids]
+        # tweets = merge_lists(thread_run(scrape_user_followers_helper, arg_list=arg_list))
         # print("found {} tweets".format(len(tweets)))
         # return tweets
+
+        print("Scraping followers of {}".format(screen_name))
+        follower_ids = random_sample(TwitterScraper.scrape_user_followers(screen_name=screen_name), n_followers)
+        tweets = []
+        for follower_id in follower_ids:
+            new_tweets = TwitterScraper.scrape_user_timeline(user_id=follower_id)
+            for tweet in new_tweets:
+                tweet["17835"]["follows"] = screen_name
+                tweet["17835"]["bias"] = BIASES.get(screen_name, None)
+            TwitterScraper.update_database_objects(new_tweets)
+            tweets += new_tweets
+        print("found {} tweets".format(len(tweets)))
+        return tweets
 
     @staticmethod
     def scrape_users_followers_timelines(screen_names: [str], n_followers=500):
@@ -370,6 +405,10 @@ class TwitterScraper:
         :param n_followers: (int) number of followers to scrape
         :return tweets: ({str: [dict]}) maps screen_name to the aggregated tweets of all followers of screen_name
         """
+
+        # arg_list = [{"screen_name": screen_name, "n_followers": n_followers} for screen_name in screen_names]
+        # tweets = parallel_run(TwitterScraper.scrape_user_followers_timelines, arg_list=arg_list)
+        # tweets = merge_lists(tweets)
         tweets = {}
         for screen_name in screen_names:
             tweets[screen_name] = TwitterScraper.scrape_user_followers_timelines(screen_name=screen_name, n_followers=n_followers)
@@ -380,7 +419,7 @@ if __name__ == '__main__':
     TwitterScraper.count_tweets(by="bias")
     # tweets = TwitterScraper.scrape_users_followers_timelines(NETWORKS, n_followers=5000)
     # tweets = TwitterScraper.fetch_all_tweets(group_by="follows")git cmp ZDf
+    tweets = TwitterScraper.scrape_users_followers_timelines(NETWORKS[3:], n_followers=100)
     # tweets = TwitterScraper.fetch_all_tweets()
-    # TwitterScraper.scrape_users_timelines(ALL_TWITTERS)
     # objects = TwitterScraper.fetch_user_tweets("seanhannity")
     print()
