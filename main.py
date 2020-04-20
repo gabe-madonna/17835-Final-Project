@@ -242,6 +242,8 @@ class TwitterScraper:
                 group_func = lambda obj: obj["17835"].get("follows", None)
             elif group_by == "screen_name":
                 group_func = lambda obj: obj["screen_name"]
+            elif group_by == "bias":
+                group_func = lambda obj: obj["17835"].get("bias", None)
             else:
                 raise ValueError("invalid group by: {}".format(group_by))
 
@@ -425,9 +427,9 @@ class TwitterScraper:
 
 
 if __name__ == '__main__':
-    # TwitterScraper.count_tweets(by="bias")
-    tweets = TwitterScraper.scrape_users_followers_timelines(NETWORKS, n_followers=5000)
-    # tweets = TwitterScraper.fetch_all_tweets()
+    TwitterScraper.count_tweets(by="bias")
+    # tweets = TwitterScraper.scrape_users_followers_timelines(NETWORKS, n_followers=1000)
+    tweets = TwitterScraper.fetch_all_tweets(group_by="bias")
     # tweets = TwitterScraper.scrape_users_followers_timelines(NETWORKS, n_followers=100)
     # tweets = TwitterScraper.fetch_all_tweets()
     # objects = TwitterScraper.fetch_user_tweets("seanhannity")
