@@ -169,12 +169,12 @@ class TwitterScraper:
         print("N tweets in database")
         if by is None:
             print(len(tweets))
+            freqs = {}
         else:
             freqs = gen_freq_dict(tweets, object_field_func=freq_f)
             print(freqs)
             print("Total: {}".format(len(tweets)))
         return freqs
-
 
     @staticmethod
     def scrape_tweets():
@@ -427,6 +427,7 @@ class TwitterScraper:
 
 
 if __name__ == '__main__':
+    len(BIASES)
     TwitterScraper.count_tweets(by="bias")
     tweets = TwitterScraper.scrape_users_followers_timelines(NETWORKS, n_followers=5000)
     # tweets = TwitterScraper.fetch_all_tweets(group_by="bias")
