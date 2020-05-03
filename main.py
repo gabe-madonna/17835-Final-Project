@@ -6,8 +6,11 @@ from bson.json_util import dumps
 from random import sample as random_sample
 import numpy as np
 import threading, queue
+import time
+
 
 BIASES = {"patribotics": -38, "Bipartisanism": -26, "fwdprogressives": -25, "HuffPost": -22, "MSNBC": -19,  "washingtonpost": -10, "CNN": -7, "propublica": -5,  "NPR": -5, "PBS": -5, "nytimes": -4, "ABC": 0, "business": 1, "CBSNews": 4, "Forbes": 5, "thehill": 10, "weeklystandard": 18, "TheTimesNUSA": 20, "amconmag": 27, "FoxNews": 27, "OANN": 28, "realDailyWire": 28, "BreitbartNews": 34, "newswarz": 38}
+BIASES_IDS = {842398676714676228: -38, 487600344: -26, 1093677320810811392: -25, 14511951: -22, 2836421: -19, 2467791: -10, 759251: -7, 14606079: -5, 5392522: -5, 12133382: -5, 807095: -4, 28785486: 0, 34713362: 1, 15012486: 4, 91478624: 5, 1917731: 10, 17546958: 18, 1238468534969270273: 20, 35511525: 27, 1367531: 27, 1209936918: 28, 4081106480: 28, 457984599: 34, 1156943065426341888: 38}
 
 
 POLITICIANS = ["BarackObama", "realDonaldTrump", "HillaryClinton", "SpeakerPelosi"]
@@ -91,6 +94,8 @@ class TwitterScraper:
     user_url = "https://api.twitter.com/1.1/users/lookup.json"
     timeline_url = "https://api.twitter.com/1.1/statuses/user_timeline.json"
     followers_url = "https://api.twitter.com/1.1/followers/ids.json"
+    friendships_url = "https://api.twitter.com/1.1/friends/list.json"
+    connection_url = "https://api.twitter.com/1.1/friendships/lookup.json"
 
     @staticmethod
     def fetch_database():
@@ -208,6 +213,15 @@ class TwitterScraper:
         for obj in objects:
             metadata = {"date_scraped": datetime.datetime.now(), "query": query, "search_id": search_id,
                         "type": object_type}
+            if object_type == "user":
+                try:
+                    metadata["friends"] = TwitterScraper.scrape_user_friends(screen_name=obj["screen_name"])
+                    metadata["bias"] = TwitterScraper.calculate_bias_from_friends(friends=metadata["friends"])
+                except ValueError as error:
+                    print(error)
+                    metadata["friends"] = []
+                    metadata["bias"] = None
+
             obj["17835"] = metadata
 
     @staticmethod
@@ -226,15 +240,50 @@ class TwitterScraper:
         return objects
 
     @staticmethod
-    def fetch_all_tweets(group_by=None):
+    def fetch_user(screen_name):
+        """
+        fetch a specific user
+        :param screen_name: (str) the twitter handle
+        :return objects: ([dict]) the tweet objects
+        """
+        objects = TwitterScraper.fetch_database_objects(query={"screen_name": screen_name, "17835.type": "user"})
+        if len(objects) == 0:
+            return None
+        else:
+            assert len(objects) == 1
+            return objects[0]
+
+    @staticmethod
+    def fetch_screennames_with_bias():
+        def valid_bias(bias):
+            if type(bias) is list:
+                return False
+            elif bias is None:
+                return False
+            elif np.isnan(bias):
+                return False
+            else:
+                return True
+        db = TwitterScraper.fetch_database()
+        resp = db.find({"17835.type": "user", "17835.bias": {"$exists": True}}, {"screen_name": True, "17835.bias": True})
+        screen_names = [r["screen_name"] for r in resp if valid_bias(r["17835"]["bias"])]
+        return screen_names
+
+    @staticmethod
+    def fetch_all_tweets(group_by=None, only_average_bias=False):
         """
         fetch all tweets in the database
         :param group_by: (str) the field to group the tweets by
             (if grouped, returns tweets as dict mapping field to list of tweets in that group)
         :return objects/objects_map: ([dict]/{group: [dict]) all tweet objects (grouped if group_by is not None)
         """
-        objects = TwitterScraper.fetch_database_objects(query={"17835.type": "tweet"},
-                                                        fields=["full_text", "screen_name", "17835.bias", "17835.follows"])
+        if only_average_bias:
+            screen_names = TwitterScraper.fetch_screennames_with_bias()
+            screen_name_query = {"$in": screen_names}
+        else:
+            screen_name_query = {"$exists": True}
+        objects = TwitterScraper.fetch_database_objects(query={"17835.type": "tweet", "user.screen_name": screen_name_query},
+                                                        fields=["full_text", "user.screen_name", "17835.bias", "17835.follows"])
         if group_by is None:
             return objects
         else:
@@ -316,15 +365,107 @@ class TwitterScraper:
         :param screen_names: ([str]) a list of handles of the users to scrape
         :return profiles: [dict] the user profile objects
         """
-        search_params = {"screen_name": screen_names}
-        search_id = uuid.uuid4().hex
-        search_resp = requests.get(TwitterScraper.user_url, params=search_params,
-                                   headers=TwitterScraper.search_header)
-        profiles = search_resp.json()
+        users_per_scrape = 10
+        if len(screen_names) > users_per_scrape:
+            batches = [screen_names[i*users_per_scrape:min((i+1)*users_per_scrape, len(screen_names))] for i in range(len(screen_names)//users_per_scrape+1)]
+            profiles = merge_lists([TwitterScraper.scrape_user_profiles(batch) for batch in batches])
+            return profiles
+        else:
+            search_params = {"screen_name": screen_names}
+            search_id = uuid.uuid4().hex
+            search_resp = requests.get(TwitterScraper.user_url, params=search_params,
+                                       headers=TwitterScraper.search_header)
+            profiles = search_resp.json()
 
-        TwitterScraper.process_objects(profiles, search_params, search_id, object_type="user")
-        TwitterScraper.put_database_objects(profiles)
-        return profiles
+            TwitterScraper.process_objects(profiles, search_params, search_id, object_type="user")
+            TwitterScraper.put_database_objects(profiles)
+            print("scraped {} user profiles".format(len(profiles)))
+            return profiles
+
+    @staticmethod
+    def scrape_user_friends(screen_name: str) -> [str]:
+        """
+        scrape the screen_names of the people followed by screen_name
+
+        :param screen_name:
+        :return:
+        """
+        cursor = -1
+        friends = []
+        while cursor != 0:
+            search_params = {"screen_name": screen_name, "count": 200, "skip_status": True,
+                             "include_user_entities": False, "cursor": cursor}
+            search_resp = requests.get(TwitterScraper.friendships_url, params=search_params,
+                                       headers=TwitterScraper.search_header).json()
+            if "errors" in search_resp:
+                if search_resp["errors"][0]["message"] == "Rate limit exceeded":
+                    print("rate limit exceded, waiting...")
+                    time.sleep(8 * 60)
+                    continue
+                else:
+                    raise ValueError("Friend Scrape Errors: {}".format(search_resp["errors"]))
+            elif "error" in search_resp:
+                raise ValueError("Friend Scrape Error: {}".format(search_resp["error"]))
+
+            friends += [r["screen_name"] for r in search_resp["users"]]
+            cursor = search_resp["next_cursor"]
+        return friends
+
+    @staticmethod
+    def calculate_bias(screen_name: str) -> float:
+        search_params = {"screen_name": screen_name, "user_id": list(BIASES_IDS.values())}
+
+        while True:
+            search_resp = requests.get(TwitterScraper.connection_url, params=search_params,
+                                       headers=TwitterScraper.search_header).json()
+            if "errors" in search_resp:
+                if search_resp["errors"][0]["message"] == "Rate limit exceeded":
+                    print("rate limit exceded, waiting...")
+                    time.sleep(60)
+                    continue
+                else:
+                    raise ValueError("Friend Scrape Errors: {}".format(search_resp["errors"]))
+            elif "error" in search_resp:
+                raise ValueError("Friend Scrape Error: {}".format(search_resp["error"]))
+            break
+        follows = search_resp
+        bias = 0
+        return bias
+
+    @staticmethod
+    def calculate_bias_from_friends(friends: [str]) -> float:
+        """
+        get the bias represented by a list of friend screen names by taking out the known networks from
+        friends and returning their mean bias
+
+        :param friends:
+        :return:
+        """
+        followed_networks = set(friends).intersection(set(BIASES.keys()))
+        mean_bias = np.mean([BIASES[network] for network in followed_networks])
+        return mean_bias
+
+    @staticmethod
+    def scrape_users_in_tweet_base():
+        db = TwitterScraper.fetch_database()
+        all_resp = list(db.find({"17835.type": "tweet"}, {"user.screen_name": True}))
+        all_screen_names = gen_freq_dict([r["user"]["screen_name"] for r in all_resp])
+        unknown_resp = list(db.find({"17835.type": "user", "17835.bias": {"$exists": False}}, {"screen_name": True, "friends_count": True}))
+        all_n_friends = {r["screen_name"]: r.get("friends_count", 99999)//200 + 1 for r in unknown_resp}
+
+        known_resp = list(db.find({"17835.type": "user", "17835.bias": {"$exists": True}}, {"screen_name": True}))
+        known_screen_names = set([s["screen_name"] for s in known_resp])
+
+        screen_names_set = set(all_screen_names) - set(known_screen_names)
+
+        # #TODO: remove this
+        # screen_names_set = set(filter(lambda s: s not in all_n_friends, screen_names_set))
+
+        screen_names = sorted(list(screen_names_set), key=lambda s: (all_n_friends.get(s, 1000), -all_screen_names[s]))
+        users = TwitterScraper.scrape_user_profiles(screen_names)
+        print("user base up to date with tweets - scraped {} users".format(len(users)))
+
+        return users
 
     @staticmethod
     def scrape_user_followers(screen_name: str):
@@ -422,18 +563,24 @@ class TwitterScraper:
     @staticmethod
     def fix_tweet_biases():
         db = TwitterScraper.fetch_database()
-        for screen_name, bias in BIASES.items():
-            db.update_many({"17835.type": "tweet", "17835.follows": screen_name}, {"$set": {"17835.bias": bias}})
+        updated = 0
+        for user in db.find({"17835.type": "user", "17835.bias": {"$exists": True}}, {"screen_name": True, "17835.bias": True}):
+            if user["17835"]["bias"] == []:
+                continue
+            screen_name, bias = user["screen_name"], user["17835"]["bias"]
+            output = db.update_many({"17835.type": "tweet", "user.screen_name": screen_name}, {"$set": {"17835.bias": bias}})
+            updated += output.modified_count
+        print("tweets updated: {}".format(updated))
 
 
 if __name__ == '__main__':
-    len(BIASES)
-    TwitterScraper.count_tweets(by="bias")
-    tweets = TwitterScraper.scrape_users_followers_timelines(NETWORKS, n_followers=5000)
-    # tweets = TwitterScraper.fetch_all_tweets(group_by="bias")
-    # tweets = TwitterScraper.scrape_users_followers_timelines(NETWORKS, n_followers=100)
-    # tweets = TwitterScraper.fetch_all_tweets()
+    # TwitterScraper.scrape_users_in_tweet_base()
+    # tweets = TwitterScraper.scrape_users_followers_timelines(NETWORKS, n_followers=5000)
+    # tweets = TwitterScraper.fetch_all_tweets(group_by="bias", only_average_bias=True)
+    tweets = TwitterScraper.fetch_all_tweets(only_average_bias=True)
+    print("average tweet bias: {}".format(np.mean([tweet["17835"]["bias"] for tweet in tweets])))
+    # tweets = TwitterScraper.fetch_all_tweets(only_average_bias=False)
     # objects = TwitterScraper.fetch_user_tweets("seanhannity")
     # TwitterScraper.fix_tweet_biases()
-    TwitterScraper.count_tweets(by="bias")
+    # TwitterScraper.count_tweets(by="bias")
     print()
